@@ -1,0 +1,17 @@
+{
+  "name": "vault-auditor",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "axios": "^1.7.7",
+    "axios-rate-limit": "^1.4.0",
+    "json2csv": "^6.0.0-alpha.2",
+    "pg": "^8.13.0"
+  }
+}
