@@ -1,22 +1,5 @@
 const utils = require('./utils');
 
-async function getNamespaces(clientConfig) {
-    let namespaceList = ['root']; // Always include "root" namespace
-
-    try {
-        const response = await clientConfig.list('sys/namespaces');
-        const keys = response.data.keys || [];
-
-        namespaceList = namespaceList.concat(
-            keys.map((namespace) => namespace.replace(/\/$/, '')) // Trim trailing slashes
-        );
-    } catch (err) {
-        throw new Error(`Error listing namespaces: ${err.message}`);
-    }
-
-    return namespaceList;
-}
-
 async function getMounts(clientConfig, namespace) {
     const namespacePath = utils.setNamespacePath(namespace);
     const namespaceInventory = {
@@ -63,6 +46,5 @@ async function getMounts(clientConfig, namespace) {
 }
 
 module.exports = {
-    getNamespaces,
     getMounts,
 };
