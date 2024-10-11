@@ -13,17 +13,18 @@ async function scanAuths(namespaceInventory, clientConfig) {
         const pathBase = `${namespacePath}auth/${authMount.path}`;
         let localErrors = [];
 
-        // Helper function to append auth data (roles/certs)
-        const appendAuthData = (dataType, item) => {
-            switch (dataType) {
-                case 'roles':
-                    authMount.roles = authMount.roles || [];
-                    authMount.roles.push(item);
-                    break;
-                case 'certs':
-                    authMount.certs = authMount.certs || [];
-                    authMount.certs.push(item);
-                    break;
+        // Helper function to append auth data (roles/certs) with structure {name, policies: []}
+        const appendAuthRole = async (key, item) => {
+            try {
+                const roleData = await clientConfig.read(`${pathBase}${key}/${item}`);
+                const policies = roleData.data.token_policies || roleData.data.allowed_policies || [];
+                authMount.authRoles = authMount.authRoles || [];
+                authMount.authRoles.push({
+                    name: item,
+                    policies: policies.map(policy => policy.toString())
+                });
+            } catch (err) {
+                localErrors.push(`Error reading role data at path ${pathBase}${key}/${item}: ${err.message}`);
             }
         };
 
@@ -32,7 +33,9 @@ async function scanAuths(namespaceInventory, clientConfig) {
             try {
                 const listResp = await clientConfig.list(`${pathBase}${key}`);
                 const keys = listResp.data.keys || [];
-                keys.forEach((item) => appendAuthData(dataType, item));
+                for (const item of keys) {
+                    await appendAuthRole(key, item); // Appending roles with {name, policies: []} structure
+                }
             } catch (err) {
                 localErrors.push(`Error listing path ${pathBase}${key}: ${err.message}`);
             }
@@ -61,5 +64,5 @@ async function scanAuths(namespaceInventory, clientConfig) {
 }
 
 module.exports = {
-    scanAuths
+    scanAuths,
 };
