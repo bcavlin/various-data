@@ -1,42 +1,47 @@
-const ClientConfig = require('./src/clientConfig');
-const { getMounts } = require('./src/mounts');
-const { getNamespaces } = require('./src/namespaces');
-const { scanEntities } = require('./src/entities');  // Importing entities module
-const { scanAuths } = require('./src/auths');
-const { scanPolicies } = require('./src/policies');
-const { scanEngines } = require('./src/engines');
-const { toCSV, toJSON, toSQL } = require('./src/output');
+const ClientConfig = require('./clientConfig');
+const { getNamespaces, getMounts } = require('./mounts');
+const { scanPolicies } = require('./policies');
+const { scanAuths } = require('./auths');
+const { scanEntities } = require('./entities');
+const { scanEngines } = require('./engines');
+const { toJSON } = require('./output');
 
 (async () => {
-    const clientConfig = new ClientConfig(process.env.VAULT_ADDR, process.env.VAULT_TOKEN, 
-        false, process.env.MAX_CONCURRENCY, process.env.RATE_LIMIT, true, '');
+    console.log('Starting Vault inventory scan...');
+
+    const clientConfig = new ClientConfig('http://localhost:8200', 'your-vault-token', false, 10, 100, true, '');
     const vaultInventory = { namespaces: [], errors: [] };
 
-    // Step 1: Get namespaces
-    console.log("Getting namespaces");
+    console.log('Fetching namespaces...');
     const namespaces = await getNamespaces(clientConfig);
-    
-    // Step 2: Concurrently process all namespaces to get mounts
-    console.log("Getting mounts");
+    console.log(`Found ${namespaces.length} namespaces.`);
+
+    // Concurrently get mounts for each namespace
     const namespaceInventories = await Promise.all(
-        namespaces.map(async (namespace) => await getMounts(clientConfig, namespace))
+        namespaces.map(async (namespace) => {
+            console.log(`Fetching mounts for namespace: ${namespace}`);
+            const namespaceInventory = await getMounts(clientConfig, namespace);
+            console.log(`Completed mounts fetch for namespace: ${namespace}`);
+            return namespaceInventory;
+        })
     );
 
-    // Add the results to the vault inventory
     vaultInventory.namespaces.push(...namespaceInventories);
 
-    // Step 3: Concurrently process each namespace (policies, auths, entities, and engines)
-    console.log("Getting rest of the data");
+    // Process each namespace (policies, auths, entities, and engines)
     await Promise.all(
         vaultInventory.namespaces.map(async (namespaceInventory) => {
+            console.log(`Starting processing for namespace: ${namespaceInventory.name}`);
             await scanPolicies(namespaceInventory, clientConfig);
             await scanAuths(namespaceInventory, clientConfig);
             await scanEntities(namespaceInventory, clientConfig);
             await scanEngines(namespaceInventory, clientConfig);
+            console.log(`Completed processing for namespace: ${namespaceInventory.name}`);
         })
     );
 
-    // Output results (You can choose either JSON, CSV, or SQL)
-    console.log("Generating export");
-    toJSON(vaultInventory, true); // Or toCSV(vaultInventory), or toSQL(vaultInventory, 'postgres://user:pass@localhost:5432/dbname');
+    console.log('Vault inventory scan completed.');
+
+    // Output the final inventory result
+    toJSON(vaultInventory, true); // Or toCSV, toSQL, etc.
 })();

@@ -9,20 +9,33 @@ async function scanAuths(namespaceInventory, clientConfig) {
     const namespacePath = utils.setNamespacePath(namespaceInventory.name);
     const authMounts = namespaceInventory.authMounts || [];
 
+    console.log(`Starting auth methods scan for namespace: ${namespaceInventory.name}`);
+
     await Promise.all(authMounts.map(async (authMount) => {
         const pathBase = `${namespacePath}auth/${authMount.path}`;
         let localErrors = [];
 
+        console.log(`Processing auth mount: ${authMount.path} of type: ${authMount.type}`);
+
         // Helper function to append auth data (roles/certs) with structure {name, policies: []}
         const appendAuthRole = async (key, item) => {
             try {
+                // Read role data for token_policies and allowed_policies
                 const roleData = await clientConfig.read(`${pathBase}${key}/${item}`);
-                const policies = roleData.data.token_policies || roleData.data.allowed_policies || [];
+                const tokenPolicies = roleData.data.token_policies || [];
+                const allowedPolicies = roleData.data.allowed_policies || [];
+
+                // Combine both token_policies and allowed_policies into a single policies array
+                const policies = [...new Set([...tokenPolicies, ...allowedPolicies])].map(policy => policy.toString());
+
                 authMount.authRoles = authMount.authRoles || [];
                 authMount.authRoles.push({
                     name: item,
-                    policies: policies.map(policy => policy.toString())
+                    policies
                 });
+
+                console.log(`Processed role: ${item} with policies: [${policies.join(', ')}]`);
+
             } catch (err) {
                 localErrors.push(`Error reading role data at path ${pathBase}${key}/${item}: ${err.message}`);
             }
@@ -33,6 +46,7 @@ async function scanAuths(namespaceInventory, clientConfig) {
             try {
                 const listResp = await clientConfig.list(`${pathBase}${key}`);
                 const keys = listResp.data.keys || [];
+                console.log(`Found ${keys.length} items at path ${pathBase}${key}`);
                 for (const item of keys) {
                     await appendAuthRole(key, item); // Appending roles with {name, policies: []} structure
                 }
@@ -60,7 +74,11 @@ async function scanAuths(namespaceInventory, clientConfig) {
         if (localErrors.length > 0) {
             utils.appendError(localErrors.join('; '), namespaceInventory.errors);
         }
+
+        console.log(`Completed processing for auth mount: ${authMount.path}`);
     }));
+
+    console.log(`Finished auth methods scan for namespace: ${namespaceInventory.name}`);
 }
 
 module.exports = {
