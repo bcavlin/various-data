@@ -18,7 +18,7 @@ async function scanAuths(namespaceInventory, clientConfig) {
         console.log(`Processing auth mount: ${authMount.path} of type: ${authMount.type}`);
 
         // Helper function to append auth data (roles/certs) with structure {name, policies: []}
-        const appendAuthRole = async (key, item) => {
+        const appendAuthData = async (key, item, dataType) => {
             try {
                 // Read role data for token_policies and allowed_policies
                 const roleData = await clientConfig.read(`${pathBase}${key}/${item}`);
@@ -28,16 +28,24 @@ async function scanAuths(namespaceInventory, clientConfig) {
                 // Combine both token_policies and allowed_policies into a single policies array
                 const policies = [...new Set([...tokenPolicies, ...allowedPolicies])].map(policy => policy.toString());
 
-                authMount.authRoles = authMount.authRoles || [];
-                authMount.authRoles.push({
-                    name: item,
-                    policies
-                });
+                if (dataType === 'roles') {
+                    authMount.Roles = authMount.Roles || [];
+                    authMount.Roles.push({
+                        name: item,
+                        policies
+                    });
+                } else if (dataType === 'certs') {
+                    authMount.Certs = authMount.Certs || [];
+                    authMount.Certs.push({
+                        name: item,
+                        policies
+                    });
+                }
 
-                console.log(`Processed role: ${item} with policies: [${policies.join(', ')}]`);
+                console.log(`Processed ${dataType.slice(0, -1)}: ${item} with policies: [${policies.join(', ')}]`);
 
             } catch (err) {
-                localErrors.push(`Error reading role data at path ${pathBase}${key}/${item}: ${err.message}`);
+                localErrors.push(`Error reading ${dataType.slice(0, -1)} data at path ${pathBase}${key}/${item}: ${err.message}`);
             }
         };
 
@@ -48,7 +56,7 @@ async function scanAuths(namespaceInventory, clientConfig) {
                 const keys = listResp.data.keys || [];
                 console.log(`Found ${keys.length} items at path ${pathBase}${key}`);
                 for (const item of keys) {
-                    await appendAuthRole(key, item); // Appending roles with {name, policies: []} structure
+                    await appendAuthData(key, item, dataType); // Append roles or certs based on dataType
                 }
             } catch (err) {
                 localErrors.push(`Error listing path ${pathBase}${key}: ${err.message}`);
