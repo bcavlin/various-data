@@ -1,3 +1,4 @@
+const _ = require('lodash');  // Import lodash
 const utils = require('./utils');
 
 // Define the auth methods with their respective types
@@ -25,24 +26,24 @@ async function scanAuths(namespaceInventory, clientConfig) {
                 const tokenPolicies = roleData.data.token_policies || [];
                 const allowedPolicies = roleData.data.allowed_policies || [];
 
-                // Combine both token_policies and allowed_policies into a single policies array
-                const policies = [...new Set([...tokenPolicies, ...allowedPolicies])].map(policy => policy.toString());
+                // Use lodash to concatenate and deduplicate policies
+                const policies = _.uniq(_.concat(tokenPolicies, allowedPolicies).map(policy => policy.toString()));
 
                 if (dataType === 'roles') {
-                    authMount.Roles = authMount.Roles || [];
-                    authMount.Roles.push({
+                    authMount.authRoles = authMount.authRoles || [];
+                    authMount.authRoles.push({
                         name: item,
                         policies
                     });
                 } else if (dataType === 'certs') {
-                    authMount.Certs = authMount.Certs || [];
-                    authMount.Certs.push({
+                    authMount.certs = authMount.certs || [];
+                    authMount.certs.push({
                         name: item,
                         policies
                     });
                 }
 
-                console.log(`Processed ${dataType.slice(0, -1)}: ${item} with policies: [${policies.join(', ')}]`);
+                // console.log(`Processed ${dataType.slice(0, -1)}: ${item} with policies: [${policies.join(', ')}]`);
 
             } catch (err) {
                 localErrors.push(`Error reading ${dataType.slice(0, -1)} data at path ${pathBase}${key}/${item}: ${err.message}`);
