@@ -1,5 +1,6 @@
 const _ = require('lodash');
 const utils = require('./utils');
+const minimatch = require('minimatch');
 
 // Constants for secret engines that use `/role` or `/roles`
 const secretEnginesWithRoles = ['aws', 'azure', 'consul', 'database', 'kubernetes', 'pki', 'ssh'];
@@ -124,19 +125,59 @@ async function processSecretMetadata(path, clientConfig, engine, kvVersion) {
             currentVersion: secretMetadata.current_version || 'unknown',
             creationTime: secretMetadata.created_time || '',
             updatedTime: secretMetadata.updated_time || '',
-            policies: [], // Policies can be added based on processing (if needed)
-            roles: [] // Roles can be added based on processing (if needed)
+            policies: [], // Policies will be filled later
+            roles: [] // Roles will be filled later
         };
+
+        // Append policies based on namespace and root level policies
+        for (const policy of engine.namespaceInventory.policies) {
+            for (const policyPath of policy.paths) {
+                if (checkForPolicyMatch(engine.namespaceInventory.name, policyPath, secret.path)) {
+                    secret.policies.push(policy.name);
+                }
+            }
+        }
+
+        // If the namespace is not "root", check root policies as well
+        if (engine.namespaceInventory.name !== "root") {
+            const rootNamespace = engine.namespaceInventory.rootNamespace;
+            for (const rootPolicy of rootNamespace.policies) {
+                for (const policyPath of rootPolicy.paths) {
+                    if (checkForPolicyMatch("root", policyPath, secret.path)) {
+                        secret.policies.push(`${rootPolicy.name} (root)`);
+                    }
+                }
+            }
+        }
+
+        // Assign roles based on the matching policies
+        for (const authMount of engine.namespaceInventory.authMounts) {
+            for (const role of authMount.roles) {
+                for (const policy of role.policies) {
+                    if (secret.policies.includes(policy)) {
+                        secret.roles.push(role.name);
+                    }
+                }
+            }
+        }
 
         // Append secret to the engine object
         engine.secrets = engine.secrets || [];
         engine.secrets.push(secret);
 
-        console.log(`Processed secret at path: ${secret.path}`);
+        console.log(`Processed secret at path: ${secret.path} with policies: [${secret.policies.join(', ')}] and roles: [${secret.roles.join(', ')}]`);
 
     } catch (err) {
         console.log(`Error processing secret metadata at path: ${path}: ${err.message}`);
     }
+}
+
+function checkForPolicyMatch(namespace, policyPath, secretPath) {
+    // Create the full policy path based on the namespace
+    const fullPolicyPath = namespace === 'root' ? `/${policyPath}` : `/${namespace}/${policyPath}`;
+
+    // Use minimatch to check if the secret path matches the policy path pattern
+    return minimatch(`/${secretPath}`, fullPolicyPath);
 }
 
 module.exports = {
