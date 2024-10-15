@@ -4,6 +4,9 @@ const utils = require('./utils');
 const secretEnginesWithRoles = ['aws', 'azure', 'consul', 'database', 'kubernetes', 'pki', 'ssh'];
 const secretEnginesWithRole = ['nomad', 'terraform', 'transform'];
 
+// Batch size for processing items
+const BATCH_SIZE = 100;
+
 async function scanEngines(namespaceInventory, clientConfig) {
     const namespacePath = utils.setNamespacePath(namespaceInventory.name);
     const path = `${namespacePath}sys/mounts`;
@@ -15,11 +18,12 @@ async function scanEngines(namespaceInventory, clientConfig) {
         const listResp = await clientConfig.read(path);
         const secretEnginesData = listResp.data || {};
 
-        // Process each secret engine
-        await Promise.all(Object.keys(secretEnginesData).map(async (enginePath) => {
+        // Process secret engines in batches of 100
+        const secretEnginePaths = Object.keys(secretEnginesData);
+        await utils.processInBatches(secretEnginePaths, BATCH_SIZE, async (enginePath) => {
             const engineData = secretEnginesData[enginePath];
             await processEngine(namespaceInventory, clientConfig, enginePath, engineData, namespacePath);
-        }));
+        });
 
         console.log(`Finished secret engines scan for namespace: ${namespaceInventory.name}`);
 
@@ -50,10 +54,10 @@ async function processEngine(namespaceInventory, clientConfig, enginePath, engin
         await listAndProcessRoles(clientConfig, engineBasePath, engine, 'roles');
     }
 
-    // If the engine is of type 'kv', walk through the secrets metadata
+    // If the engine is of type 'kv', walk through the secrets metadata in batches
     if (engine.type === 'kv') {
         const kvPath = engine.version === '2' ? `${engineBasePath}metadata` : engineBasePath;
-        await walkKvPath(kvPath, clientConfig, engine, namespaceInventory);
+        await walkKvPathInBatches(kvPath, clientConfig, engine, namespaceInventory);
     }
 
     engine.itemCount = engine.secrets.length;
@@ -71,30 +75,35 @@ async function listAndProcessRoles(clientConfig, basePath, engine, roleType) {
         const listResp = await clientConfig.list(rolePath);
         const keys = listResp.data.keys || [];
 
-        // Append roles to the engine object
-        engine.roles = _.concat(engine.roles, keys.map(role => role.toString()));
-
         console.log(`Found ${keys.length} roles at path: ${rolePath}`);
+
+        // Process roles in batches
+        await utils.processInBatches(keys, BATCH_SIZE, async (role) => {
+            engine.roles = _.concat(engine.roles, role.toString());
+        });
 
     } catch (err) {
         console.log(`Error listing roles at path: ${rolePath}: ${err.message}`);
     }
 }
 
-async function walkKvPath(basePath, clientConfig, engine, namespaceInventory) {
+async function walkKvPathInBatches(basePath, clientConfig, engine, namespaceInventory) {
     try {
         const listResp = await clientConfig.list(basePath);
         const keys = listResp.data.keys || [];
 
-        for (const kvPath of keys) {
+        console.log(`Walking KV path: ${basePath}, found ${keys.length} items`);
+
+        // Process KV secrets metadata in batches
+        await utils.processInBatches(keys, BATCH_SIZE, async (kvPath) => {
             if (kvPath.endsWith('/')) {
                 // Recurse into subdirectories
-                await walkKvPath(`${basePath}/${kvPath}`, clientConfig, engine, namespaceInventory);
+                await walkKvPathInBatches(`${basePath}/${kvPath}`, clientConfig, engine, namespaceInventory);
             } else {
                 // Fetch the metadata of the secret
                 await processSecretMetadata(`${basePath}/${kvPath}`, clientConfig, engine);
             }
-        }
+        });
 
     } catch (err) {
         utils.appendError(`Error walking KV path ${basePath}: ${err.message}`, namespaceInventory.errors);
