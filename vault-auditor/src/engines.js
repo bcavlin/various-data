@@ -1,6 +1,7 @@
 const _ = require('lodash');
 const utils = require('./utils');
 
+// Constants for secret engines that use `/role` or `/roles`
 const secretEnginesWithRoles = ['aws', 'azure', 'consul', 'database', 'kubernetes', 'pki', 'ssh'];
 const secretEnginesWithRole = ['nomad', 'terraform', 'transform'];
 
@@ -18,7 +19,7 @@ async function scanEngines(namespaceInventory, clientConfig) {
         const listResp = await clientConfig.read(path);
         const secretEnginesData = listResp.data || {};
 
-        // Process secret engines in batches of 100
+        // Process secret engines in batches
         const secretEnginePaths = Object.keys(secretEnginesData);
         await utils.processInBatches(secretEnginePaths, BATCH_SIZE, async (enginePath) => {
             const engineData = secretEnginesData[enginePath];
@@ -36,7 +37,7 @@ async function processEngine(namespaceInventory, clientConfig, enginePath, engin
     const engine = {
         path: enginePath,
         type: engineData.type || '',
-        version: engineData?.options?.version || '',
+        version: engineData?.options?.version || '', // Detecting KV v1 vs KV v2
         roles: [],
         secrets: [],
         itemCount: 0
@@ -46,7 +47,7 @@ async function processEngine(namespaceInventory, clientConfig, enginePath, engin
 
     const engineBasePath = `${namespacePath}${enginePath}`;
 
-    // If the engine has roles (like AWS, Azure, etc.), fetch and process roles
+    // If the engine has roles (e.g., AWS, Azure), process roles
     if (secretEnginesWithRoles.includes(engine.type)) {
         await listAndProcessRoles(clientConfig, engineBasePath, engine, 'role');
     }
@@ -54,10 +55,10 @@ async function processEngine(namespaceInventory, clientConfig, enginePath, engin
         await listAndProcessRoles(clientConfig, engineBasePath, engine, 'roles');
     }
 
-    // If the engine is of type 'kv', walk through the secrets metadata in batches
+    // If the engine is KV, distinguish between KV v1 and KV v2
     if (engine.type === 'kv') {
         const kvPath = engine.version === '2' ? `${engineBasePath}metadata` : engineBasePath;
-        await walkKvPathInBatches(kvPath, clientConfig, engine, namespaceInventory);
+        await walkKvPathInBatches(kvPath, clientConfig, engine, namespaceInventory, engine.version);
     }
 
     engine.itemCount = engine.secrets.length;
@@ -87,7 +88,7 @@ async function listAndProcessRoles(clientConfig, basePath, engine, roleType) {
     }
 }
 
-async function walkKvPathInBatches(basePath, clientConfig, engine, namespaceInventory) {
+async function walkKvPathInBatches(basePath, clientConfig, engine, namespaceInventory, kvVersion) {
     try {
         const listResp = await clientConfig.list(basePath);
         const keys = listResp.data.keys || [];
@@ -98,10 +99,11 @@ async function walkKvPathInBatches(basePath, clientConfig, engine, namespaceInve
         await utils.processInBatches(keys, BATCH_SIZE, async (kvPath) => {
             if (kvPath.endsWith('/')) {
                 // Recurse into subdirectories
-                await walkKvPathInBatches(`${basePath}/${kvPath}`, clientConfig, engine, namespaceInventory);
+                await walkKvPathInBatches(`${basePath}/${kvPath}`, clientConfig, engine, namespaceInventory, kvVersion);
             } else {
-                // Fetch the metadata of the secret
-                await processSecretMetadata(`${basePath}/${kvPath}`, clientConfig, engine);
+                // Fetch the metadata of the secret for KV v2, or process the secret directly for KV v1
+                const secretPath = kvVersion === '2' ? `${basePath}/${kvPath}` : `${basePath}${kvPath}`;
+                await processSecretMetadata(secretPath, clientConfig, engine, kvVersion);
             }
         });
 
@@ -110,17 +112,20 @@ async function walkKvPathInBatches(basePath, clientConfig, engine, namespaceInve
     }
 }
 
-async function processSecretMetadata(path, clientConfig, engine) {
+async function processSecretMetadata(path, clientConfig, engine, kvVersion) {
     try {
-        const metadataResp = await clientConfig.read(path);
+        // If KV v2, we fetch from the /metadata path, for KV v1 we fetch directly
+        const metadataPath = kvVersion === '2' ? path : path.replace('/metadata', '');
+        const metadataResp = await clientConfig.read(metadataPath);
         const secretMetadata = metadataResp.data || {};
 
         const secret = {
-            path: path.replace('/metadata', ''),
+            path: metadataPath.replace('/metadata', ''), // Strip out '/metadata' for KV v2
             currentVersion: secretMetadata.current_version || 'unknown',
             creationTime: secretMetadata.created_time || '',
             updatedTime: secretMetadata.updated_time || '',
-            policies: []  // Policies can be added later if needed
+            policies: [], // Policies can be added based on processing (if needed)
+            roles: [] // Roles can be added based on processing (if needed)
         };
 
         // Append secret to the engine object
