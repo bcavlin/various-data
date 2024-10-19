@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: logstash
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: logstash
+  template:
+    metadata:
+      labels:
+        app: logstash
+    spec:
+      containers:
+      - name: logstash
+        image: docker.elastic.co/logstash/logstash:7.10.2
+        volumeMounts:
+        - name: logstash-config
+          mountPath: /usr/share/logstash/pipeline
+        ports:
+        - containerPort: 5000
+          name: tcp-input-5000
+        - containerPort: 6000
+          name: tcp-input-6000
+      volumes:
+      - name: logstash-config
+        hostPath:
+          path: /path/to/local/logstash/config  # Adjust path as needed
+          type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: logstash-service
+spec:
+  selector:
+    app: logstash
+  ports:
+  - protocol: TCP
+    port: 5000
+    targetPort: 5000
+    name: tcp-input-5000
+  - protocol: TCP
+    port: 6000
+    targetPort: 6000
+    name: tcp-input-6000
+  type: NodePort
